@@ -1,0 +1,75 @@
+{
+  "name": "the-token-company",
+  "version": "0.1.0",
+  "description": "Node.js SDK for The Token Company — compress LLM prompts to reduce costs and latency",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./openai": {
+      "types": "./dist/openai.d.ts",
+      "import": "./dist/openai.js"
+    },
+    "./anthropic": {
+      "types": "./dist/anthropic.d.ts",
+      "import": "./dist/anthropic.js"
+    },
+    "./ai-sdk": {
+      "types": "./dist/ai-sdk.d.ts",
+      "import": "./dist/ai-sdk.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "llm",
+    "compression",
+    "tokens",
+    "ai",
+    "prompt-optimization",
+    "openai",
+    "anthropic",
+    "vercel-ai-sdk"
+  ],
+  "author": "The Token Company <support@thetokencompany.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheTokenCompany/the-token-company-node"
+  },
+  "homepage": "https://thetokencompany.com",
+  "devDependencies": {
+    "@ai-sdk/provider": "^3.0.10",
+    "@types/node": "^22",
+    "ai": "^6.0.195",
+    "typescript": "^5.7",
+    "vitest": "^3"
+  },
+  "peerDependencies": {
+    "@anthropic-ai/sdk": ">=0.30.0",
+    "ai": ">=4.0.0",
+    "openai": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
+  }
+}
