@@ -16,3 +16,10 @@ export type {
   WithCompressionOptions,
   TurnStats,
 } from "./types.js";
+
+/**
+ * Wrap text in `<ttc_safe>` tags to protect it from compression.
+ */
+export function protect(text: string): string {
+  return `<ttc_safe>${text}</ttc_safe>`;
+}

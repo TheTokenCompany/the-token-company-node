@@ -9,22 +9,19 @@ import { CompressionStats } from "./types.js";
 /**
  * Create a Vercel AI SDK middleware that auto-compresses non-assistant messages.
  *
- * Use when composing with other middleware:
- *
  * ```ts
  * import { wrapLanguageModel } from "ai";
  * import { openai } from "@ai-sdk/openai";
  * import { compressionMiddleware } from "the-token-company/ai-sdk";
  *
- * const { middleware, compression } = compressionMiddleware({ compressionApiKey: "ttc-..." });
+ * const middleware = compressionMiddleware({ compressionApiKey: "ttc-..." });
  * const model = wrapLanguageModel({ model: openai("gpt-4o"), middleware });
- * // After calls: compression.totalTokensSaved
+ * // After calls: middleware.compression.totalTokensSaved
  * ```
  */
-export function compressionMiddleware(options: WithCompressionOptions): {
-  middleware: LanguageModelMiddleware;
-  compression: CompressionStats;
-} {
+export function compressionMiddleware(
+  options: WithCompressionOptions
+): LanguageModelMiddleware & { compression: CompressionStats } {
   const stats = new CompressionStats();
   const analytics = new AnalyticsTTC(
     new TheTokenCompany({ apiKey: options.compressionApiKey }),
@@ -33,8 +30,9 @@ export function compressionMiddleware(options: WithCompressionOptions): {
   const compressionModel = options.model ?? "bear-2";
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
 
-  const middleware: LanguageModelMiddleware = {
+  const middleware: LanguageModelMiddleware & { compression: CompressionStats } = {
     specificationVersion: "v3",
+    compression: stats,
     transformParams: async ({ params }) => {
       if (params.prompt) {
         stats._startTurn();
@@ -51,7 +49,7 @@ export function compressionMiddleware(options: WithCompressionOptions): {
     },
   };
 
-  return { middleware, compression: stats };
+  return middleware;
 }
 
 /**
@@ -62,13 +60,13 @@ export function compressionMiddleware(options: WithCompressionOptions): {
  * import { generateText } from "ai";
  * import { withCompression } from "the-token-company/ai-sdk";
  *
- * const { model, compression } = withCompression(openai("gpt-4o"), { compressionApiKey: "ttc-..." });
+ * const model = withCompression(openai("gpt-4o"), { compressionApiKey: "ttc-..." });
  *
  * const { text } = await generateText({
  *   model,
  *   messages: [{ role: "user", content: "Summarize these results..." }],
  * });
- * console.log(compression.totalTokensSaved);
+ * console.log(model.compression.totalTokensSaved);
  * ```
  *
  * Works with any provider (`@ai-sdk/openai`, `@ai-sdk/anthropic`, `@ai-sdk/google`, etc.).
@@ -76,10 +74,11 @@ export function compressionMiddleware(options: WithCompressionOptions): {
 export function withCompression(
   model: LanguageModelV3,
   options: WithCompressionOptions
-): { model: LanguageModelV3; compression: CompressionStats } {
-  const { middleware, compression } = compressionMiddleware(options);
-  return {
-    model: wrapLanguageModel({ model, middleware }),
-    compression,
+): LanguageModelV3 & { compression: CompressionStats } {
+  const mw = compressionMiddleware(options);
+  const wrapped = wrapLanguageModel({ model, middleware: mw }) as LanguageModelV3 & {
+    compression: CompressionStats;
   };
+  wrapped.compression = mw.compression;
+  return wrapped;
 }
