@@ -141,6 +141,24 @@ withCompression(client, {
 | `system`   | `role: "system"` messages       | `system` parameter             | System messages     |
 | `tool`     | `tool` + `function` messages    | `tool_result` content blocks   | Tool result parts   |
 
+## App ID
+
+Tag compression requests with an application identifier for usage tracking:
+
+```ts
+// Set on the client — applies to all requests
+const client = new TheTokenCompany({ apiKey: "ttc-...", appId: "my-chatbot" });
+
+// Or per-request (overrides the client-level value)
+const result = await client.compress(text, { model: "bear-2", appId: "my-chatbot" });
+```
+
+Also supported in wrappers:
+
+```ts
+const client = withCompression(new OpenAI(), { compressionApiKey: "ttc-...", appId: "my-chatbot" });
+```
+
 ## Gzip
 
 Gzip compression of request payloads is on by default. Disable with:

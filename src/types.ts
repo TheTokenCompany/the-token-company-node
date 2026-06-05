@@ -4,6 +4,7 @@ export interface CompressRequest {
   compression_settings: {
     aggressiveness: number;
   };
+  app_id?: string;
 }
 
 export interface CompressResponse {
@@ -25,6 +26,7 @@ export interface TheTokenCompanyOptions {
   baseUrl?: string;
   timeout?: number;
   gzip?: boolean;
+  appId?: string;
 }
 
 export type Aggressiveness = number | Record<string, number>;
@@ -33,6 +35,7 @@ export interface WithCompressionOptions {
   compressionApiKey: string;
   model?: string;
   aggressiveness?: Aggressiveness;
+  appId?: string;
 }
 
 export interface TurnStats {

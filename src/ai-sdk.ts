@@ -24,7 +24,7 @@ export function compressionMiddleware(
 ): LanguageModelMiddleware & { compression: CompressionStats } {
   const stats = new CompressionStats();
   const analytics = new AnalyticsTTC(
-    new TheTokenCompany({ apiKey: options.compressionApiKey }),
+    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId }),
     stats
   );
   const compressionModel = options.model ?? "bear-2";

@@ -25,17 +25,19 @@ export class TheTokenCompany {
   private readonly apiKey: string;
   private readonly timeout: number;
   private readonly gzip: boolean;
+  private readonly appId?: string;
 
   constructor(options: TheTokenCompanyOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = (options.baseUrl ?? BASE_URL).replace(/\/$/, "");
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.gzip = options.gzip ?? true;
+    this.appId = options.appId;
   }
 
   async compress(
     text: string,
-    options: { model?: string; aggressiveness?: number } = {}
+    options: { model?: string; aggressiveness?: number; appId?: string } = {}
   ): Promise<CompressResult> {
     const { model = "bear-2", aggressiveness = 0.2 } = options;
 
@@ -46,10 +48,12 @@ export class TheTokenCompany {
       throw new InvalidRequestError("aggressiveness must be between 0.0 and 1.0");
     }
 
+    const resolvedAppId = options.appId ?? this.appId;
     const payload: CompressRequest = {
       model,
       input: text,
       compression_settings: { aggressiveness },
+      ...(resolvedAppId !== undefined && { app_id: resolvedAppId }),
     };
 
     const jsonBody = JSON.stringify(payload);
