@@ -1,12 +1,16 @@
+<div align="center">
+
 # The Token Company Node.js SDK
 
 Compress LLM prompts to reduce costs and latency. 100K tokens compressed in ~85ms.
 
+[![CI](https://github.com/TheTokenCompany/the-token-company-node/actions/workflows/ci.yml/badge.svg)](https://github.com/TheTokenCompany/the-token-company-node/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/the-token-company)](https://www.npmjs.com/package/the-token-company)
-[![npm downloads](https://img.shields.io/npm/dm/the-token-company)](https://www.npmjs.com/package/the-token-company)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/TheTokenCompany/the-token-company-node/blob/main/LICENSE)
 
 [Docs](https://thetokencompany.com/docs) · [Website](https://thetokencompany.com) · [Dashboard](https://app.thetokencompany.com) · [Python SDK](https://github.com/TheTokenCompany/the-token-company-python)
+
+</div>
 
 ## Install
 
