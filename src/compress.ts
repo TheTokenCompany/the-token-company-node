@@ -8,7 +8,7 @@ export interface Compressor {
   compress(text: string, options: { model?: string; aggressiveness?: number }): Promise<CompressResult>;
 }
 
-export class AnalyticsTTC implements Compressor {
+export class StatsTTC implements Compressor {
   constructor(
     private readonly inner: TheTokenCompany,
     public readonly stats: CompressionStats

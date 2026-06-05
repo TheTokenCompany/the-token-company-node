@@ -1,5 +1,5 @@
 import { TheTokenCompany } from "./client.js";
-import { AnalyticsTTC, compressOpenAIMessages, resolveAggressiveness } from "./compress.js";
+import { StatsTTC, compressOpenAIMessages, resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -27,7 +27,7 @@ export function withCompression<T extends { chat: { completions: { create: Funct
   options: WithCompressionOptions
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const analytics = new AnalyticsTTC(
+  const compressor = new StatsTTC(
     new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId }),
     stats
   );
@@ -40,7 +40,7 @@ export function withCompression<T extends { chat: { completions: { create: Funct
       stats._startTurn();
       params = {
         ...params,
-        messages: await compressOpenAIMessages(analytics, params.messages, model, roleAggr),
+        messages: await compressOpenAIMessages(compressor, params.messages, model, roleAggr),
       };
       stats._endTurn();
     }

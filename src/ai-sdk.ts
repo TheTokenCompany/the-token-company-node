@@ -2,7 +2,7 @@ import { wrapLanguageModel } from "ai";
 import type { LanguageModelMiddleware } from "ai";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { TheTokenCompany } from "./client.js";
-import { AnalyticsTTC, compressAISDKPrompt, resolveAggressiveness } from "./compress.js";
+import { StatsTTC, compressAISDKPrompt, resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -23,7 +23,7 @@ export function compressionMiddleware(
   options: WithCompressionOptions
 ): LanguageModelMiddleware & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const analytics = new AnalyticsTTC(
+  const compressor = new StatsTTC(
     new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId }),
     stats
   );
@@ -37,7 +37,7 @@ export function compressionMiddleware(
       if (params.prompt) {
         stats._startTurn();
         const compressed = await compressAISDKPrompt(
-          analytics,
+          compressor,
           params.prompt as any[],
           compressionModel,
           roleAggr

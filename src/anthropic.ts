@@ -1,5 +1,5 @@
 import { TheTokenCompany } from "./client.js";
-import { AnalyticsTTC, compressAnthropicMessages, resolveAggressiveness } from "./compress.js";
+import { StatsTTC, compressAnthropicMessages, resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -29,7 +29,7 @@ export function withCompression<T extends { messages: { create: Function } }>(
   options: WithCompressionOptions
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const analytics = new AnalyticsTTC(
+  const compressor = new StatsTTC(
     new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId }),
     stats
   );
@@ -43,11 +43,11 @@ export function withCompression<T extends { messages: { create: Function } }>(
     if (params?.messages) {
       params = {
         ...params,
-        messages: await compressAnthropicMessages(analytics, params.messages, model, roleAggr),
+        messages: await compressAnthropicMessages(compressor, params.messages, model, roleAggr),
       };
     }
     if (systemAggr != null && typeof params?.system === "string" && params.system.trim()) {
-      const result = await analytics.compress(params.system, { model, aggressiveness: systemAggr });
+      const result = await compressor.compress(params.system, { model, aggressiveness: systemAggr });
       params = { ...params, system: result.output };
     }
     stats._endTurn();
