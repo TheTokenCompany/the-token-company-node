@@ -27,6 +27,7 @@ export interface TheTokenCompanyOptions {
   timeout?: number;
   gzip?: boolean;
   appId?: string;
+  fetch?: typeof globalThis.fetch;
 }
 
 export type Aggressiveness = number | Record<string, number>;
@@ -36,6 +37,7 @@ export interface WithCompressionOptions {
   model?: string;
   aggressiveness?: Aggressiveness;
   appId?: string;
+  fetch?: typeof globalThis.fetch;
 }
 
 export interface TurnStats {

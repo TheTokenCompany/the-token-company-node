@@ -26,6 +26,7 @@ export class TheTokenCompany {
   private readonly timeout: number;
   private readonly gzip: boolean;
   private readonly appId?: string;
+  private readonly fetchFn: typeof globalThis.fetch;
 
   constructor(options: TheTokenCompanyOptions) {
     this.apiKey = options.apiKey;
@@ -33,6 +34,7 @@ export class TheTokenCompany {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT;
     this.gzip = options.gzip ?? true;
     this.appId = options.appId;
+    this.fetchFn = options.fetch ?? globalThis.fetch;
   }
 
   async compress(
@@ -70,7 +72,7 @@ export class TheTokenCompany {
       body = jsonBody;
     }
 
-    const response = await fetch(`${this.baseUrl}/v1/compress`, {
+    const response = await this.fetchFn(`${this.baseUrl}/v1/compress`, {
       method: "POST",
       headers,
       body: body as BodyInit,

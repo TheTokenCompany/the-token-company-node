@@ -28,7 +28,7 @@ export function withCompression<T extends { chat: { completions: { create: Funct
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
   const compressor = new StatsTTC(
-    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId }),
+    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch }),
     stats
   );
   const model = options.model ?? "bear-2";
