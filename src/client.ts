@@ -1,6 +1,6 @@
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
-import type { CompressRequest, CompressResponse, CompressResult, TheTokenCompanyOptions } from "./types.js";
+import type { CompressRequest, CompressResponse, CompressResult, SearchRequestOptions, SearchResult, TheTokenCompanyOptions } from "./types.js";
 import {
   APIError,
   AuthenticationError,
@@ -91,6 +91,72 @@ export class TheTokenCompany {
       tokensSaved: data.original_input_tokens - data.output_tokens,
       compressionRatio:
         data.output_tokens === 0 ? 0 : data.original_input_tokens / data.output_tokens,
+    };
+  }
+
+  async search(
+    query: string,
+    options: SearchRequestOptions = {}
+  ): Promise<SearchResult> {
+    const {
+      maxResults = 5,
+      searchDepth = "basic",
+      includeRawContent = false,
+      model = "bear-2",
+      aggressiveness = 0.3,
+    } = options;
+
+    const resolvedAppId = options.appId ?? this.appId;
+    const payload = {
+      query,
+      max_results: maxResults,
+      search_depth: searchDepth,
+      include_raw_content: includeRawContent,
+      model,
+      compression_settings: { aggressiveness },
+      ...(resolvedAppId !== undefined && { app_id: resolvedAppId }),
+    };
+
+    const jsonBody = JSON.stringify(payload);
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+
+    let body: Uint8Array | string;
+    if (this.gzip) {
+      headers["Content-Encoding"] = "gzip";
+      body = new Uint8Array(await gzipAsync(jsonBody));
+    } else {
+      body = jsonBody;
+    }
+
+    const response = await this.fetchFn(`${this.baseUrl}/v1/search`, {
+      method: "POST",
+      headers,
+      body: body as BodyInit,
+      signal: AbortSignal.timeout(this.timeout),
+    });
+
+    if (!response.ok) {
+      throw await this.parseError(response);
+    }
+
+    const data = (await response.json()) as {
+      results: Array<{ url: string; title: string; content: string; score?: number }>;
+      query: string;
+      search_time: number;
+      original_input_tokens: number;
+      output_tokens: number;
+    };
+
+    return {
+      results: data.results,
+      query: data.query,
+      searchTime: data.search_time,
+      originalInputTokens: data.original_input_tokens,
+      outputTokens: data.output_tokens,
+      tokensSaved: data.original_input_tokens - data.output_tokens,
     };
   }
 

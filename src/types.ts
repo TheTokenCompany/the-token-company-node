@@ -40,8 +40,34 @@ export interface WithCompressionOptions {
   compressAssistant?: boolean;
   /** Strip server-side tool result blocks (e.g. web_search_tool_result) from assistant messages. Disables citations in subsequent turns. */
   stripServerToolResults?: boolean;
+  baseUrl?: string;
   appId?: string;
   fetch?: typeof globalThis.fetch;
+}
+
+export interface SearchRequestOptions {
+  maxResults?: number;
+  searchDepth?: "basic" | "advanced";
+  includeRawContent?: boolean;
+  model?: string;
+  aggressiveness?: number;
+  appId?: string;
+}
+
+export interface SearchResultItem {
+  url: string;
+  title: string;
+  content: string;
+  score?: number;
+}
+
+export interface SearchResult {
+  results: SearchResultItem[];
+  query: string;
+  searchTime: number;
+  originalInputTokens: number;
+  outputTokens: number;
+  tokensSaved: number;
 }
 
 export interface TurnStats {

@@ -30,7 +30,7 @@ export function withCompression<T extends { messages: { create: Function } }>(
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
   const compressor = new StatsTTC(
-    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch }),
+    new TheTokenCompany({ apiKey: options.compressionApiKey, baseUrl: options.baseUrl, appId: options.appId, fetch: options.fetch }),
     stats
   );
   const model = options.model ?? "bear-2";

@@ -15,6 +15,9 @@ export type {
   Aggressiveness,
   WithCompressionOptions,
   TurnStats,
+  SearchRequestOptions,
+  SearchResultItem,
+  SearchResult,
 } from "./types.js";
 
 /**
