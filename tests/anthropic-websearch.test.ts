@@ -65,7 +65,7 @@ describe("withCompression webSearch", () => {
     expect(passedParams.tools.some((t: any) => t.name === "ttc_web_search")).toBe(false);
   });
 
-  it("webSearch true removes web_search_20250305 and adds ttc_web_search", async () => {
+  it("webSearch true removes any web_search_* version and adds ttc_web_search", async () => {
     const fetchFn = mockFetch(COMPRESS_RESPONSE);
     const originalTools = [
       { type: "web_search_20250305", name: "web_search", max_uses: 3 },
@@ -90,12 +90,37 @@ describe("withCompression webSearch", () => {
     });
 
     const passedParams = createFn.mock.calls[0][0];
-    // Should NOT have web_search_20250305
-    expect(passedParams.tools.some((t: any) => t.type === "web_search_20250305")).toBe(false);
+    // Should NOT have any web_search_* type
+    expect(passedParams.tools.some((t: any) => String(t.type ?? "").startsWith("web_search_"))).toBe(false);
     // Should have ttc_web_search
     expect(passedParams.tools.some((t: any) => t.name === "ttc_web_search")).toBe(true);
     // Should still have other_tool
     expect(passedParams.tools.some((t: any) => t.name === "other_tool")).toBe(true);
+  });
+
+  it("webSearch true removes web_search_20260209 variant", async () => {
+    const fetchFn = mockFetch(COMPRESS_RESPONSE);
+    const createFn = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "hello" }],
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      fetch: fetchFn,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "web_search_20260209", name: "web_search" }],
+    });
+
+    const passedParams = createFn.mock.calls[0][0];
+    expect(passedParams.tools.some((t: any) => String(t.type ?? "").startsWith("web_search_"))).toBe(false);
+    expect(passedParams.tools.some((t: any) => t.name === "ttc_web_search")).toBe(true);
   });
 
   it("webSearch true adds ttc_web_search even when no tools provided", async () => {

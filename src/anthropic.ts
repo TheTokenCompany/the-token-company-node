@@ -20,7 +20,7 @@ const TTC_SEARCH_TOOL = {
 
 function injectSearchTool(params: any): any {
   let tools = params.tools ? [...params.tools] : [];
-  tools = tools.filter((t: any) => t.type !== "web_search_20250305");
+  tools = tools.filter((t: any) => !String(t.type ?? "").startsWith("web_search_"));
   if (!tools.some((t: any) => t.name === "ttc_web_search")) {
     tools.push(TTC_SEARCH_TOOL);
   }
