@@ -3,6 +3,7 @@ import type { Aggressiveness, CompressResult } from "./types.js";
 import { CompressionStats } from "./types.js";
 
 const DEFAULT_ROLES = ["user", "system", "tool"] as const;
+const SERVER_TOOL_BLOCK_TYPES = new Set(["web_search_tool_result", "server_tool_use"]);
 
 export interface Compressor {
   compress(text: string, options: { model?: string; aggressiveness?: number }): Promise<CompressResult>;
@@ -100,10 +101,29 @@ export async function compressAnthropicMessages(
   ttc: Compressor,
   messages: AnthropicMessage[],
   model: string,
-  roleAggr: Record<string, number>
+  roleAggr: Record<string, number>,
+  options?: { stripServerToolResults?: boolean }
 ): Promise<AnthropicMessage[]> {
+  const stripServerToolResults = options?.stripServerToolResults ?? false;
   return Promise.all(
     messages.map(async (msg) => {
+      if (msg.role === "assistant") {
+        const assistantAggr = roleAggr["assistant"];
+        if (assistantAggr == null && !stripServerToolResults) return msg;
+
+        if (typeof msg.content === "string" && assistantAggr != null && msg.content.trim()) {
+          const result = await ttc.compress(msg.content, { model, aggressiveness: assistantAggr });
+          return { ...msg, content: result.output };
+        }
+
+        if (Array.isArray(msg.content)) {
+          const blocks = await compressAssistantBlocks(ttc, msg.content, model, assistantAggr, stripServerToolResults);
+          return { ...msg, content: blocks };
+        }
+
+        return msg;
+      }
+
       if (msg.role !== "user") return msg;
 
       const userAggr = roleAggr["user"];
@@ -123,6 +143,29 @@ export async function compressAnthropicMessages(
       return msg;
     })
   );
+}
+
+async function compressAssistantBlocks(
+  ttc: Compressor,
+  blocks: AnthropicBlock[],
+  model: string,
+  assistantAggr: number | undefined,
+  stripServerToolResults: boolean
+): Promise<AnthropicBlock[]> {
+  const results = await Promise.all(
+    blocks.map(async (block) => {
+      if (stripServerToolResults && SERVER_TOOL_BLOCK_TYPES.has(block.type)) {
+        return null;
+      }
+      if (block.type === "text" && assistantAggr != null && typeof block.text === "string" && block.text.trim()) {
+        const result = await ttc.compress(block.text, { model, aggressiveness: assistantAggr });
+        return { ...block, text: result.output };
+      }
+      return block;
+    })
+  );
+  const filtered = results.filter((b): b is AnthropicBlock => b != null);
+  return filtered.length > 0 ? filtered : blocks;
 }
 
 async function compressAnthropicBlocks(
