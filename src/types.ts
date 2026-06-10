@@ -36,6 +36,10 @@ export interface WithCompressionOptions {
   compressionApiKey: string;
   model?: string;
   aggressiveness?: Aggressiveness;
+  /** Compress text blocks in assistant messages (multi-turn web search optimization). */
+  compressAssistant?: boolean;
+  /** Strip server-side tool result blocks (e.g. web_search_tool_result) from assistant messages. Disables citations in subsequent turns. */
+  stripServerToolResults?: boolean;
   appId?: string;
   fetch?: typeof globalThis.fetch;
 }

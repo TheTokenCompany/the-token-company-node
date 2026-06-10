@@ -35,7 +35,11 @@ export function withCompression<T extends { messages: { create: Function } }>(
   );
   const model = options.model ?? "bear-2";
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
+  if (options.compressAssistant && !("assistant" in roleAggr)) {
+    roleAggr["assistant"] = roleAggr["user"] ?? 0.2;
+  }
   const systemAggr = roleAggr["system"];
+  const stripServerToolResults = options.stripServerToolResults ?? false;
   const originalCreate = client.messages.create.bind(client.messages);
 
   client.messages.create = async function (params: any, ...rest: any[]) {
@@ -43,7 +47,7 @@ export function withCompression<T extends { messages: { create: Function } }>(
     if (params?.messages) {
       params = {
         ...params,
-        messages: await compressAnthropicMessages(compressor, params.messages, model, roleAggr),
+        messages: await compressAnthropicMessages(compressor, params.messages, model, roleAggr, { stripServerToolResults }),
       };
     }
     if (systemAggr != null && typeof params?.system === "string" && params.system.trim()) {
