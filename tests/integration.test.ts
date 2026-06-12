@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import Anthropic from "@anthropic-ai/sdk";
+import { describe, it, expect, beforeAll } from "vitest";
 import { TheTokenCompany } from "../src/client.js";
 import { withCompression } from "../src/anthropic.js";
 
@@ -7,11 +6,15 @@ const TTC_API_KEY = process.env.TTC_API_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const skip = !TTC_API_KEY || !ANTHROPIC_API_KEY;
 
+let Anthropic: any;
+
 describe.skipIf(skip)("integration: real endpoints", () => {
   let ttc: TheTokenCompany;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     ttc = new TheTokenCompany({ apiKey: TTC_API_KEY! });
+    const mod = await import("@anthropic-ai/sdk");
+    Anthropic = mod.default;
   });
 
   it("TTC compress endpoint works", async () => {
@@ -74,7 +77,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
   }, 30_000);
 
   it("search results are NOT double-compressed in multi-turn", async () => {
-    // We intercept fetch to track which texts get sent to the compress endpoint
     const compressedTexts: string[] = [];
     const originalFetch = globalThis.fetch;
     const interceptFetch: typeof globalThis.fetch = async (input, init) => {
@@ -82,7 +84,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
       const response = await originalFetch(input, init);
 
       if (url.includes("/v1/compress")) {
-        // Clone and read the body to see what got compressed
         const cloned = response.clone();
         try {
           const json = await cloned.json() as { output?: string };
@@ -99,7 +100,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
       fetch: interceptFetch,
     });
 
-    // Turn 1: trigger a search
     const turn1Response = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 300,
@@ -108,10 +108,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
     });
     expect(turn1Response.stop_reason).toBe("end_turn");
 
-    // Build the multi-turn history as a user would
-    // We need the assistant's search tool_use and the tool_result from turn 1
-    // Since handleSearchLoop runs internally, we simulate the conversation history
-    // that a real user would construct for turn 2
     const searchToolUseId = "toolu_turn1";
     const searchResultContent = "Source: Wikipedia\nURL: https://en.wikipedia.org/wiki/Reykjavik\nReykjavik is the capital of Iceland.";
 
@@ -147,15 +143,11 @@ describe.skipIf(skip)("integration: real endpoints", () => {
 
     expect(turn2Response.stop_reason).toBe("end_turn");
 
-    // Verify: the search result content should NOT have been compressed
-    // (it should not appear in any compress call output)
     const searchContentWasCompressed = compressedTexts.some(
       (t) => t.includes("Reykjavik is the capital of Iceland")
     );
     expect(searchContentWasCompressed).toBe(false);
 
-    // But user text messages SHOULD have been compressed
-    // (at minimum the follow-up question was sent to compress)
     expect(compressedTexts.length).toBeGreaterThan(0);
   }, 30_000);
 
@@ -166,7 +158,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : (input as Request).url;
 
       if (url.includes("/v1/compress") && init?.body) {
-        // Decompress gzipped request body to see what text is being compressed
         try {
           const { gunzip } = await import("node:zlib");
           const { promisify } = await import("node:util");
@@ -211,7 +202,6 @@ describe.skipIf(skip)("integration: real endpoints", () => {
 
     expect(response.stop_reason).toBe("end_turn");
 
-    // The calculator tool_result SHOULD have been sent to compress
     const calcWasCompressed = compressInputs.some(
       (t) => t.includes("calculator returned the result")
     );
