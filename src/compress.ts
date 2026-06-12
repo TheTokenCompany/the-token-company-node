@@ -87,6 +87,7 @@ export async function compressOpenAIMessages(
 interface AnthropicBlock {
   type: string;
   text?: string;
+  tool_use_id?: string;
   content?: string | Array<{ type: string; text?: string; [key: string]: unknown }>;
   [key: string]: unknown;
 }
@@ -97,14 +98,28 @@ interface AnthropicMessage {
   [key: string]: unknown;
 }
 
+function collectToolUseIds(messages: AnthropicMessage[], toolName: string): Set<string> {
+  const ids = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block.type === "tool_use" && block.name === toolName && block.id) {
+        ids.add(block.id as string);
+      }
+    }
+  }
+  return ids;
+}
+
 export async function compressAnthropicMessages(
   ttc: Compressor,
   messages: AnthropicMessage[],
   model: string,
   roleAggr: Record<string, number>,
-  options?: { stripServerToolResults?: boolean }
+  options?: { stripServerToolResults?: boolean; skipToolName?: string }
 ): Promise<AnthropicMessage[]> {
   const stripServerToolResults = options?.stripServerToolResults ?? false;
+  const skipIds = options?.skipToolName ? collectToolUseIds(messages, options.skipToolName) : undefined;
   return Promise.all(
     messages.map(async (msg) => {
       if (msg.role === "assistant") {
@@ -136,7 +151,7 @@ export async function compressAnthropicMessages(
       }
 
       if (Array.isArray(msg.content)) {
-        const blocks = await compressAnthropicBlocks(ttc, msg.content, model, userAggr, toolAggr);
+        const blocks = await compressAnthropicBlocks(ttc, msg.content, model, userAggr, toolAggr, skipIds);
         return { ...msg, content: blocks };
       }
 
@@ -173,7 +188,8 @@ async function compressAnthropicBlocks(
   blocks: AnthropicBlock[],
   model: string,
   userAggr: number | undefined,
-  toolAggr: number | undefined
+  toolAggr: number | undefined,
+  skipIds?: Set<string>
 ): Promise<AnthropicBlock[]> {
   return Promise.all(
     blocks.map(async (block) => {
@@ -183,6 +199,7 @@ async function compressAnthropicBlocks(
       }
 
       if (block.type === "tool_result" && toolAggr != null) {
+        if (block.tool_use_id && skipIds?.has(block.tool_use_id)) return block;
         return compressToolResult(ttc, block, model, toolAggr);
       }
 

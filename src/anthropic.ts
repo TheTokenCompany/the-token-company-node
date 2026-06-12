@@ -122,7 +122,10 @@ export function withCompression<T extends { messages: { create: Function } }>(
     if (params?.messages) {
       params = {
         ...params,
-        messages: await compressAnthropicMessages(compressor, params.messages, model, roleAggr, { stripServerToolResults }),
+        messages: await compressAnthropicMessages(compressor, params.messages, model, roleAggr, {
+          stripServerToolResults,
+          skipToolName: webSearch ? "ttc_web_search" : undefined,
+        }),
       };
     }
     if (systemAggr != null && typeof params?.system === "string" && params.system.trim()) {

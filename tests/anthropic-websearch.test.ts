@@ -340,6 +340,181 @@ describe("withCompression webSearch", () => {
     expect(response.stop_reason).toBe("end_turn");
   });
 
+  it("does not double-compress search results on multi-turn conversation", async () => {
+    const compressCalls: string[] = [];
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      // Decompress gzipped body to inspect the request
+      let payload: any;
+      try {
+        const { gunzip } = await import("node:zlib");
+        const { promisify } = await import("node:util");
+        const gunzipAsync = promisify(gunzip);
+        const buf = Buffer.from(opts.body);
+        const decompressed = await gunzipAsync(buf);
+        payload = JSON.parse(decompressed.toString());
+      } catch {
+        payload = JSON.parse(typeof opts.body === "string" ? opts.body : "{}");
+      }
+
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/search")) {
+        return {
+          ok: true, status: 200,
+          json: async () => SEARCH_RESPONSE,
+          text: async () => JSON.stringify(SEARCH_RESPONSE),
+        };
+      }
+      // Compress endpoint — track what gets compressed
+      if (payload.input) {
+        compressCalls.push(payload.input);
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          output: `[c]${payload.input ?? ""}`,
+          output_tokens: 5,
+          original_input_tokens: 20,
+        }),
+        text: async () => "{}",
+      };
+    });
+
+    let turnCount = 0;
+    const createFn = vi.fn().mockImplementation(async () => {
+      turnCount++;
+      if (turnCount === 1) {
+        // Turn 1: model wants to search
+        return {
+          stop_reason: "tool_use",
+          content: [
+            { type: "tool_use", id: "toolu_s1", name: "ttc_web_search", input: { query: "latest news" } },
+          ],
+        };
+      }
+      if (turnCount === 2) {
+        // Turn 1 continued: model answers after search
+        return {
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "Here are the results." }],
+        };
+      }
+      // Turn 2: model answers directly
+      return {
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Sure, more info." }],
+      };
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      fetch: fetchFn,
+    });
+
+    // Turn 1: triggers search
+    const response1 = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "What is the latest news?" }],
+    });
+    expect(response1.stop_reason).toBe("end_turn");
+
+    // Build turn 2 messages including the full conversation history
+    // This simulates what a user would do: pass previous messages + new message
+    const turn2Messages = [
+      { role: "user", content: "What is the latest news?" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool_use", id: "toolu_s1", name: "ttc_web_search", input: { query: "latest news" } },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "tool_result", tool_use_id: "toolu_s1", content: "Source: Example\nURL: https://example.com\nResult content" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "Here are the results." }] },
+      { role: "user", content: "Tell me more" },
+    ];
+
+    compressCalls.length = 0; // Reset tracking
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: turn2Messages,
+    });
+
+    // The search tool_result content should NOT appear in compression calls
+    const searchContent = "Source: Example\nURL: https://example.com\nResult content";
+    expect(compressCalls).not.toContain(searchContent);
+    // But the user text messages should be compressed
+    expect(compressCalls).toContain("What is the latest news?");
+    expect(compressCalls).toContain("Tell me more");
+  });
+
+  it("does not skip compression when webSearch is false even with ttc_web_search tool_use in history", async () => {
+    const compressCalls: string[] = [];
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      let payload: any;
+      try {
+        const { gunzip } = await import("node:zlib");
+        const { promisify } = await import("node:util");
+        const gunzipAsync = promisify(gunzip);
+        const buf = Buffer.from(opts.body);
+        const decompressed = await gunzipAsync(buf);
+        payload = JSON.parse(decompressed.toString());
+      } catch {
+        payload = JSON.parse(typeof opts.body === "string" ? opts.body : "{}");
+      }
+      if (payload.input) compressCalls.push(payload.input);
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          output: `[c]${payload.input ?? ""}`,
+          output_tokens: 5,
+          original_input_tokens: 20,
+        }),
+        text: async () => "{}",
+      };
+    });
+
+    const createFn = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "ok" }],
+    });
+
+    // webSearch: false (default)
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      fetch: fetchFn,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_s1", name: "ttc_web_search", input: { query: "q" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_s1", content: "search data" },
+          ],
+        },
+      ],
+    });
+
+    // With webSearch off, the tool_result SHOULD be compressed (no skip logic)
+    expect(compressCalls).toContain("search data");
+  });
+
   it("does not loop for non-search tool_use", async () => {
     const fetchFn = mockFetch(COMPRESS_RESPONSE);
     const createFn = vi.fn().mockResolvedValue({
