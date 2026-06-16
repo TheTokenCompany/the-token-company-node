@@ -93,6 +93,17 @@ export class CompressionStats {
     this._accumulator.push(result);
   }
 
+  _recordSearch(result: SearchResult): void {
+    this.history.push({
+      inputTokens: result.originalInputTokens,
+      outputTokens: result.outputTokens,
+      tokensSaved: result.tokensSaved,
+      messagesCompressed: 0,
+      ratio: result.outputTokens === 0 ? 0 : result.originalInputTokens / result.outputTokens,
+      timestamp: Date.now(),
+    });
+  }
+
   _endTurn(): void {
     if (this._accumulator.length > 0) {
       const inputTokens = this._accumulator.reduce((s, r) => s + r.inputTokens, 0);

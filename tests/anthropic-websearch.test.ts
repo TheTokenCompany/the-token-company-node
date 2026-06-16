@@ -515,6 +515,119 @@ describe("withCompression webSearch", () => {
     expect(compressCalls).toContain("search data");
   });
 
+  it("multi-search preserves context across iterations", async () => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string) => {
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/search")) {
+        return {
+          ok: true, status: 200,
+          json: async () => SEARCH_RESPONSE,
+          text: async () => JSON.stringify(SEARCH_RESPONSE),
+        };
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => COMPRESS_RESPONSE,
+        text: async () => JSON.stringify(COMPRESS_RESPONSE),
+      };
+    });
+
+    let callCount = 0;
+    const createFn = vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount <= 3) {
+        return {
+          stop_reason: "tool_use",
+          content: [{
+            type: "tool_use",
+            id: `toolu_${callCount}`,
+            name: "ttc_web_search",
+            input: { query: `query ${callCount}` },
+          }],
+        };
+      }
+      return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      fetch: fetchFn,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "Research AI" }],
+    });
+
+    expect(createFn).toHaveBeenCalledTimes(4);
+
+    // The 4th call (final) must have all 3 assistant+tool_result pairs
+    const lastCall = createFn.mock.calls[3][0];
+    const assistantMsgs = lastCall.messages.filter((m: any) => m.role === "assistant");
+    const toolResultMsgs = lastCall.messages.filter(
+      (m: any) => m.role === "user" && Array.isArray(m.content) &&
+        m.content.some((b: any) => b.type === "tool_result")
+    );
+
+    expect(assistantMsgs).toHaveLength(3);
+    expect(toolResultMsgs).toHaveLength(3);
+  });
+
+  it("search compression stats are tracked", async () => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string) => {
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/search")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            ...SEARCH_RESPONSE,
+            original_input_tokens: 1000,
+            output_tokens: 700,
+          }),
+          text: async () => "{}",
+        };
+      }
+      // No-op compress (0 savings)
+      return {
+        ok: true, status: 200,
+        json: async () => ({ output: "same", output_tokens: 10, original_input_tokens: 10 }),
+        text: async () => "{}",
+      };
+    });
+
+    let callCount = 0;
+    const createFn = vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          stop_reason: "tool_use",
+          content: [{
+            type: "tool_use", id: "toolu_1", name: "ttc_web_search",
+            input: { query: "test" },
+          }],
+        };
+      }
+      return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      fetch: fetchFn,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "search" }],
+    });
+
+    // Search saved 300 tokens (1000→700), compress saved 0
+    expect(client.compression.totalTokensSaved).toBeGreaterThanOrEqual(300);
+  });
+
   it("does not loop for non-search tool_use", async () => {
     const fetchFn = mockFetch(COMPRESS_RESPONSE);
     const createFn = vi.fn().mockResolvedValue({

@@ -42,11 +42,10 @@ function formatSearchResults(results: SearchResultItem[]): string {
 
 async function handleSearchLoop(
   response: any, params: any, originalCreate: Function,
-  ttcClient: TheTokenCompany, rest: any[]
+  ttcClient: TheTokenCompany, stats: CompressionStats, rest: any[]
 ): Promise<any> {
+  const messages = [...(params.messages || [])];
   while (hasSearchToolUse(response)) {
-    const messages = [...(params.messages || [])];
-
     // Add assistant response
     const assistantContent = response.content.map((b: any) => {
       if (typeof b.toJSON === 'function') return b.toJSON();
@@ -60,6 +59,7 @@ async function handleSearchLoop(
       if (block.type === "tool_use" && block.name === "ttc_web_search") {
         const query = block.input?.query || "";
         const searchResult = await ttcClient.search(query);
+        stats._recordSearch(searchResult);
         toolResults.push({
           type: "tool_result",
           tool_use_id: block.id,
@@ -143,7 +143,7 @@ export function withCompression<T extends { messages: { create: Function } }>(
 
     // Handle search tool loop
     if (webSearch) {
-      response = await handleSearchLoop(response, params, originalCreate, ttcClient, rest);
+      response = await handleSearchLoop(response, params, originalCreate, ttcClient, stats, rest);
     }
 
     return response;
