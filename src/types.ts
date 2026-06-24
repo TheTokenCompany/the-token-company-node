@@ -21,6 +21,43 @@ export interface CompressResult {
   compressionRatio: number;
 }
 
+export type ChatFormat = "openai" | "anthropic" | "aisdk";
+
+export interface ChatCompressOptions {
+  model?: string;
+  format?: ChatFormat;
+  aggressiveness?: Aggressiveness;
+  /** Anthropic top-level `system` prompt (string or content blocks). */
+  system?: unknown;
+  /** Anthropic: drop server tool-result blocks before sending. */
+  stripServerToolResults?: boolean;
+  /** Anthropic: tool_result ids to leave untouched. */
+  skipToolUseIds?: string[];
+  appId?: string;
+}
+
+export interface ChatCompressResponse {
+  messages: unknown[];
+  system?: unknown;
+  original_input_tokens: number;
+  output_tokens: number;
+  cache_hits: number;
+  cache_misses: number;
+  compression_time: number;
+}
+
+export interface ChatCompressResult {
+  messages: unknown[];
+  system?: unknown;
+  inputTokens: number;
+  outputTokens: number;
+  cacheHits: number;
+  cacheMisses: number;
+  compressionTime: number;
+  tokensSaved: number;
+  messagesCompressed: number;
+}
+
 export interface TheTokenCompanyOptions {
   apiKey: string;
   baseUrl?: string;
@@ -42,6 +79,13 @@ export interface WithCompressionOptions {
   stripServerToolResults?: boolean;
   /** Replace Anthropic's server-side web search with TTC's compressible search. */
   webSearch?: boolean;
+  /**
+   * Cap the number of actual web searches per request when `webSearch` is on.
+   * Mirrors Anthropic's native `max_uses`: once spent, further search requests
+   * get an error tool_result (scoped to that query) instead of running.
+   * Resolution order: this value > a stripped native tool's `max_uses` > 10.
+   */
+  webSearchMaxUses?: number;
   baseUrl?: string;
   appId?: string;
   fetch?: typeof globalThis.fetch;
@@ -100,6 +144,18 @@ export class CompressionStats {
       tokensSaved: result.tokensSaved,
       messagesCompressed: 0,
       ratio: result.outputTokens === 0 ? 0 : result.originalInputTokens / result.outputTokens,
+      timestamp: Date.now(),
+    });
+  }
+
+  /** Record a whole-conversation batch compression as a single turn. */
+  _recordChat(result: ChatCompressResult): void {
+    this.history.push({
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      tokensSaved: result.tokensSaved,
+      messagesCompressed: result.messagesCompressed,
+      ratio: result.outputTokens === 0 ? 0 : result.inputTokens / result.outputTokens,
       timestamp: Date.now(),
     });
   }

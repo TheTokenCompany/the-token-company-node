@@ -1,5 +1,5 @@
 import { TheTokenCompany } from "./client.js";
-import { StatsTTC, compressOpenAIMessages, resolveAggressiveness } from "./compress.js";
+import { resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -27,22 +27,29 @@ export function withCompression<T extends { chat: { completions: { create: Funct
   options: WithCompressionOptions
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const compressor = new StatsTTC(
-    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch }),
-    stats
-  );
+  const ttcClient = new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch });
   const model = options.model ?? "bear-2";
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
   const originalCreate = client.chat.completions.create.bind(client.chat.completions);
 
   client.chat.completions.create = async function (params: any, ...rest: any[]) {
     if (params?.messages) {
-      stats._startTurn();
-      params = {
-        ...params,
-        messages: await compressOpenAIMessages(compressor, params.messages, model, roleAggr),
-      };
-      stats._endTurn();
+      // One request for the whole conversation — the server walks the roles,
+      // compresses every segment concurrently, and serves re-sent history
+      // from cache.
+      try {
+        const result = await ttcClient.compressChat(params.messages, {
+          model,
+          format: "openai",
+          aggressiveness: roleAggr,
+        });
+        params = { ...params, messages: result.messages };
+        stats._recordChat(result);
+      } catch (e) {
+        // Graceful degradation: a compression-backend fault must never break
+        // the customer's underlying LLM call. Send the original messages.
+        console.warn(`[the-token-company] compression failed (${e}); sending uncompressed.`);
+      }
     }
     return originalCreate(params, ...rest);
   } as any;

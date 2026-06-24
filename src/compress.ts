@@ -98,7 +98,7 @@ interface AnthropicMessage {
   [key: string]: unknown;
 }
 
-function collectToolUseIds(messages: AnthropicMessage[], toolName: string): Set<string> {
+export function collectToolUseIds(messages: AnthropicMessage[], toolName: string): Set<string> {
   const ids = new Set<string>();
   for (const msg of messages) {
     if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;

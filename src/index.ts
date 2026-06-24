@@ -11,6 +11,9 @@ export {
 export { CompressionStats } from "./types.js";
 export type {
   CompressResult,
+  ChatFormat,
+  ChatCompressOptions,
+  ChatCompressResult,
   TheTokenCompanyOptions,
   Aggressiveness,
   WithCompressionOptions,

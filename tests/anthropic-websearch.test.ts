@@ -26,11 +26,55 @@ const SEARCH_RESPONSE = {
   output_tokens: 30,
 };
 
+/** True if any message carries an is_error tool_result (e.g. budget exhausted). */
+function sawErrorResult(messages: any[]): boolean {
+  return (messages || []).some(
+    (m) => Array.isArray(m.content) && m.content.some((b: any) => b.is_error === true)
+  );
+}
+
 function makeMockClient(createFn: Function) {
   return {
     messages: {
       create: createFn,
     },
+  };
+}
+
+function mockOk(body: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
+}
+
+async function readBody(opts: any): Promise<any> {
+  try {
+    const { gunzip } = await import("node:zlib");
+    const { promisify } = await import("node:util");
+    const gunzipAsync = promisify(gunzip);
+    return JSON.parse((await gunzipAsync(Buffer.from(opts.body))).toString());
+  } catch {
+    return JSON.parse(typeof opts?.body === "string" ? opts.body : "{}");
+  }
+}
+
+/** Build a /v1/chat/compress response that echoes the request's messages. */
+function chatCompressBody(
+  messages: unknown[],
+  opts: { system?: unknown; inputTokens?: number; outputTokens?: number } = {}
+) {
+  const n = Array.isArray(messages) ? messages.length : 1;
+  return {
+    messages,
+    system: opts.system ?? null,
+    original_input_tokens: opts.inputTokens ?? 20,
+    output_tokens: opts.outputTokens ?? 5,
+    cache_hits: 0,
+    cache_misses: n,
+    compression_time: 0,
   };
 }
 
@@ -173,22 +217,14 @@ describe("withCompression webSearch", () => {
   });
 
   it("tool loop handles search response and re-calls create", async () => {
-    // The fetch mock handles both compress and search calls
-    const fetchFn = vi.fn()
-      .mockResolvedValueOnce({
-        // First call: compress
-        ok: true,
-        status: 200,
-        json: async () => COMPRESS_RESPONSE,
-        text: async () => JSON.stringify(COMPRESS_RESPONSE),
-      })
-      .mockResolvedValueOnce({
-        // Second call: search
-        ok: true,
-        status: 200,
-        json: async () => SEARCH_RESPONSE,
-        text: async () => JSON.stringify(SEARCH_RESPONSE),
-      });
+    // The fetch mock handles both chat-compress and search calls. Chat-compress
+    // echoes the request's messages back (compression is server-side now).
+    const fetchFn = vi.fn().mockImplementation(async (url: string, opts: any) => {
+      const u = typeof url === "string" ? url : "";
+      if (u.includes("/v1/search")) return mockOk(SEARCH_RESPONSE);
+      const body = await readBody(opts);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
+    });
 
     let callCount = 0;
     const createFn = vi.fn().mockImplementation(async () => {
@@ -341,42 +377,14 @@ describe("withCompression webSearch", () => {
   });
 
   it("does not double-compress search results on multi-turn conversation", async () => {
-    const compressCalls: string[] = [];
+    // Track the payloads sent to /v1/chat/compress.
+    const chatPayloads: any[] = [];
     const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
-      // Decompress gzipped body to inspect the request
-      let payload: any;
-      try {
-        const { gunzip } = await import("node:zlib");
-        const { promisify } = await import("node:util");
-        const gunzipAsync = promisify(gunzip);
-        const buf = Buffer.from(opts.body);
-        const decompressed = await gunzipAsync(buf);
-        payload = JSON.parse(decompressed.toString());
-      } catch {
-        payload = JSON.parse(typeof opts.body === "string" ? opts.body : "{}");
-      }
-
       const url = typeof _url === "string" ? _url : "";
-      if (url.includes("/v1/search")) {
-        return {
-          ok: true, status: 200,
-          json: async () => SEARCH_RESPONSE,
-          text: async () => JSON.stringify(SEARCH_RESPONSE),
-        };
-      }
-      // Compress endpoint — track what gets compressed
-      if (payload.input) {
-        compressCalls.push(payload.input);
-      }
-      return {
-        ok: true, status: 200,
-        json: async () => ({
-          output: `[c]${payload.input ?? ""}`,
-          output_tokens: 5,
-          original_input_tokens: 20,
-        }),
-        text: async () => "{}",
-      };
+      if (url.includes("/v1/search")) return mockOk(SEARCH_RESPONSE);
+      const body = await readBody(opts);
+      chatPayloads.push(body);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
     });
 
     let turnCount = 0;
@@ -439,7 +447,7 @@ describe("withCompression webSearch", () => {
       { role: "user", content: "Tell me more" },
     ];
 
-    compressCalls.length = 0; // Reset tracking
+    chatPayloads.length = 0; // Reset tracking
 
     await client.messages.create({
       model: "claude-sonnet-4-6",
@@ -447,38 +455,31 @@ describe("withCompression webSearch", () => {
       messages: turn2Messages,
     });
 
-    // The search tool_result content should NOT appear in compression calls
-    const searchContent = "Source: Example\nURL: https://example.com\nResult content";
-    expect(compressCalls).not.toContain(searchContent);
-    // But the user text messages should be compressed
-    expect(compressCalls).toContain("What is the latest news?");
-    expect(compressCalls).toContain("Tell me more");
+    // Turn 2 compresses the whole conversation in exactly ONE call — the
+    // search loop does not re-issue compression. Already-seen segments are
+    // deduped by the server cache, not the client.
+    expect(chatPayloads).toHaveLength(1);
+    const sentMessages = chatPayloads[0].messages as any[];
+    // The new user texts are forwarded for compression.
+    const userTexts = sentMessages
+      .filter((m) => typeof m.content === "string")
+      .map((m) => m.content);
+    expect(userTexts).toContain("What is the latest news?");
+    expect(userTexts).toContain("Tell me more");
+    // The prior search tool_result is forwarded as-is (the client no longer
+    // strips/compresses it locally).
+    const toolResultMsg = sentMessages.find(
+      (m) => Array.isArray(m.content) && m.content.some((b: any) => b.type === "tool_result")
+    );
+    expect(toolResultMsg).toBeTruthy();
   });
 
   it("does not skip compression when webSearch is false even with ttc_web_search tool_use in history", async () => {
-    const compressCalls: string[] = [];
+    const chatPayloads: any[] = [];
     const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
-      let payload: any;
-      try {
-        const { gunzip } = await import("node:zlib");
-        const { promisify } = await import("node:util");
-        const gunzipAsync = promisify(gunzip);
-        const buf = Buffer.from(opts.body);
-        const decompressed = await gunzipAsync(buf);
-        payload = JSON.parse(decompressed.toString());
-      } catch {
-        payload = JSON.parse(typeof opts.body === "string" ? opts.body : "{}");
-      }
-      if (payload.input) compressCalls.push(payload.input);
-      return {
-        ok: true, status: 200,
-        json: async () => ({
-          output: `[c]${payload.input ?? ""}`,
-          output_tokens: 5,
-          original_input_tokens: 20,
-        }),
-        text: async () => "{}",
-      };
+      const body = await readBody(opts);
+      chatPayloads.push(body);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
     });
 
     const createFn = vi.fn().mockResolvedValue({
@@ -511,25 +512,25 @@ describe("withCompression webSearch", () => {
       ],
     });
 
-    // With webSearch off, the tool_result SHOULD be compressed (no skip logic)
-    expect(compressCalls).toContain("search data");
+    // With webSearch off, no skip list is sent, so the server compresses the
+    // tool_result. The SDK's job is to forward it with an empty/absent skip
+    // list — verify that.
+    expect(chatPayloads).toHaveLength(1);
+    const payload = chatPayloads[0];
+    expect(payload.skip_tool_use_ids).toBeFalsy();
+    const toolResultMsg = (payload.messages as any[]).find(
+      (m) => Array.isArray(m.content) && m.content.some((b: any) => b.type === "tool_result")
+    );
+    expect(toolResultMsg).toBeTruthy();
+    expect(toolResultMsg.content[0].content).toBe("search data");
   });
 
   it("multi-search preserves context across iterations", async () => {
-    const fetchFn = vi.fn().mockImplementation(async (_url: string) => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
       const url = typeof _url === "string" ? _url : "";
-      if (url.includes("/v1/search")) {
-        return {
-          ok: true, status: 200,
-          json: async () => SEARCH_RESPONSE,
-          text: async () => JSON.stringify(SEARCH_RESPONSE),
-        };
-      }
-      return {
-        ok: true, status: 200,
-        json: async () => COMPRESS_RESPONSE,
-        text: async () => JSON.stringify(COMPRESS_RESPONSE),
-      };
+      if (url.includes("/v1/search")) return mockOk(SEARCH_RESPONSE);
+      const body = await readBody(opts);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
     });
 
     let callCount = 0;
@@ -576,25 +577,14 @@ describe("withCompression webSearch", () => {
   });
 
   it("search compression stats are tracked", async () => {
-    const fetchFn = vi.fn().mockImplementation(async (_url: string) => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
       const url = typeof _url === "string" ? _url : "";
       if (url.includes("/v1/search")) {
-        return {
-          ok: true, status: 200,
-          json: async () => ({
-            ...SEARCH_RESPONSE,
-            original_input_tokens: 1000,
-            output_tokens: 700,
-          }),
-          text: async () => "{}",
-        };
+        return mockOk({ ...SEARCH_RESPONSE, original_input_tokens: 1000, output_tokens: 700 });
       }
-      // No-op compress (0 savings)
-      return {
-        ok: true, status: 200,
-        json: async () => ({ output: "same", output_tokens: 10, original_input_tokens: 10 }),
-        text: async () => "{}",
-      };
+      // No-op message compression (0 savings) so we isolate search savings.
+      const body = await readBody(opts);
+      return mockOk(chatCompressBody(body.messages, { inputTokens: 10, outputTokens: 10 }));
     });
 
     let callCount = 0;
@@ -626,6 +616,143 @@ describe("withCompression webSearch", () => {
 
     // Search saved 300 tokens (1000→700), compress saved 0
     expect(client.compression.totalTokensSaved).toBeGreaterThanOrEqual(300);
+  });
+
+  it("caps actual searches at webSearchMaxUses and answers with what it has", async () => {
+    // The model wants to search forever; the cap must stop it.
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/search")) return mockOk(SEARCH_RESPONSE);
+      const body = await readBody(opts);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
+    });
+
+    let searchCalls = 0;
+    const wrappedFetch = vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("/v1/search")) searchCalls++;
+      return fetchFn(url, opts);
+    });
+
+    // A realistic model: keeps searching, but answers once it sees a search
+    // came back as an error (the budget-exhausted result) — like native does.
+    const createFn = vi.fn().mockImplementation(async (p: any) => {
+      if (sawErrorResult(p.messages)) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [{
+          type: "tool_use",
+          id: `toolu_${createFn.mock.calls.length}`,
+          name: "ttc_web_search",
+          input: { query: "again" },
+        }],
+      };
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      webSearchMaxUses: 3,
+      fetch: wrappedFetch,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "research deeply" }],
+    });
+
+    // Exactly 3 real /v1/search calls fire; further rounds get an error result.
+    expect(searchCalls).toBe(3);
+
+    // The round that exceeds the budget gets an is_error tool_result.
+    const sawBudgetError = createFn.mock.calls.some((call) => {
+      const msgs = call[0].messages as any[];
+      return msgs.some(
+        (m) => Array.isArray(m.content) &&
+          m.content.some((b: any) => b.is_error === true)
+      );
+    });
+    expect(sawBudgetError).toBe(true);
+  });
+
+  it("carries over a native web_search tool's max_uses as the cap", async () => {
+    const fetchFn = vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/search")) return mockOk(SEARCH_RESPONSE);
+      const body = await readBody(opts);
+      return mockOk(chatCompressBody(body.messages, { system: body.system }));
+    });
+    let searchCalls = 0;
+    const wrappedFetch = vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("/v1/search")) searchCalls++;
+      return fetchFn(url, opts);
+    });
+
+    const createFn = vi.fn().mockImplementation(async (p: any) => {
+      if (sawErrorResult(p.messages)) {
+        return { stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] };
+      }
+      return {
+        stop_reason: "tool_use",
+        content: [{
+          type: "tool_use",
+          id: `toolu_${createFn.mock.calls.length}`,
+          name: "ttc_web_search",
+          input: { query: "again" },
+        }],
+      };
+    });
+
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      webSearch: true,
+      fetch: wrappedFetch,
+    });
+
+    await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "research" }],
+      // No explicit option — the native tool's max_uses=2 should be honored.
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 2 }],
+    });
+
+    expect(searchCalls).toBe(2);
+  });
+
+  it("compression failure falls through to the uncompressed messages", async () => {
+    // /v1/chat/compress fails; the customer's create call must still succeed
+    // with the ORIGINAL messages.
+    const fetchFn = vi.fn().mockImplementation(async (_url: string) => {
+      const url = typeof _url === "string" ? _url : "";
+      if (url.includes("/v1/chat/compress")) {
+        return { ok: false, status: 503, json: async () => ({}), text: async () => "down" };
+      }
+      return mockOk(SEARCH_RESPONSE);
+    });
+
+    const createFn = vi.fn().mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: "ok" }],
+    });
+
+    const original = [{ role: "user", content: "hello" }];
+    const client = withCompression(makeMockClient(createFn), {
+      compressionApiKey: "ttc-test",
+      fetch: fetchFn,
+    });
+
+    const response = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: original,
+    });
+
+    expect(response.stop_reason).toBe("end_turn");
+    // The underlying create received the original, uncompressed messages.
+    expect(createFn.mock.calls[0][0].messages).toEqual(original);
   });
 
   it("does not loop for non-search tool_use", async () => {

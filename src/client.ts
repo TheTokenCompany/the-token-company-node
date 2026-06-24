@@ -1,6 +1,6 @@
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
-import type { CompressRequest, CompressResponse, CompressResult, SearchRequestOptions, SearchResult, TheTokenCompanyOptions } from "./types.js";
+import type { ChatCompressOptions, ChatCompressResponse, ChatCompressResult, CompressRequest, CompressResponse, CompressResult, SearchRequestOptions, SearchResult, TheTokenCompanyOptions } from "./types.js";
 import {
   APIError,
   AuthenticationError,
@@ -92,6 +92,76 @@ export class TheTokenCompany {
       compressionRatio:
         data.output_tokens === 0 ? 0 : data.original_input_tokens / data.output_tokens,
     };
+  }
+
+  /**
+   * Compress a whole chat conversation in a single request.
+   *
+   * Sends the entire message array to `/v1/chat/compress` instead of one
+   * request per message, so a long multi-turn conversation costs one
+   * round-trip and the re-sent history is served from cache server-side.
+   */
+  async compressChat(
+    messages: unknown[],
+    options: ChatCompressOptions = {}
+  ): Promise<ChatCompressResult> {
+    const { model = "bear-2", format = "openai", aggressiveness = 0.2 } = options;
+    const resolvedAppId = options.appId ?? this.appId;
+
+    const payload: Record<string, unknown> = {
+      model,
+      format,
+      messages,
+      aggressiveness,
+      ...(options.system !== undefined && { system: options.system }),
+      ...(options.stripServerToolResults && { strip_server_tool_results: true }),
+      ...(options.skipToolUseIds && options.skipToolUseIds.length > 0 && {
+        skip_tool_use_ids: options.skipToolUseIds,
+      }),
+      ...(resolvedAppId !== undefined && { app_id: resolvedAppId }),
+    };
+
+    const data = await this.postJson<ChatCompressResponse>("/v1/chat/compress", payload);
+    return {
+      messages: data.messages,
+      system: data.system,
+      inputTokens: data.original_input_tokens,
+      outputTokens: data.output_tokens,
+      cacheHits: data.cache_hits,
+      cacheMisses: data.cache_misses,
+      compressionTime: data.compression_time,
+      tokensSaved: data.original_input_tokens - data.output_tokens,
+      messagesCompressed: data.cache_hits + data.cache_misses,
+    };
+  }
+
+  private async postJson<T>(path: string, payload: unknown): Promise<T> {
+    const jsonBody = JSON.stringify(payload);
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+      "Content-Type": "application/json",
+    };
+
+    let body: Uint8Array | string;
+    if (this.gzip) {
+      headers["Content-Encoding"] = "gzip";
+      body = new Uint8Array(await gzipAsync(jsonBody));
+    } else {
+      body = jsonBody;
+    }
+
+    const response = await this.fetchFn(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers,
+      body: body as BodyInit,
+      signal: AbortSignal.timeout(this.timeout),
+    });
+
+    if (!response.ok) {
+      throw await this.parseError(response);
+    }
+
+    return (await response.json()) as T;
   }
 
   async search(

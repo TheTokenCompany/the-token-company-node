@@ -2,7 +2,7 @@ import { wrapLanguageModel } from "ai";
 import type { LanguageModelMiddleware } from "ai";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { TheTokenCompany } from "./client.js";
-import { StatsTTC, compressAISDKPrompt, resolveAggressiveness } from "./compress.js";
+import { resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -23,10 +23,7 @@ export function compressionMiddleware(
   options: WithCompressionOptions
 ): LanguageModelMiddleware & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const compressor = new StatsTTC(
-    new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch }),
-    stats
-  );
+  const ttcClient = new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch });
   const compressionModel = options.model ?? "bear-2";
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
 
@@ -35,15 +32,21 @@ export function compressionMiddleware(
     compression: stats,
     transformParams: async ({ params }) => {
       if (params.prompt) {
-        stats._startTurn();
-        const compressed = await compressAISDKPrompt(
-          compressor,
-          params.prompt as any[],
-          compressionModel,
-          roleAggr
-        );
-        stats._endTurn();
-        return { ...params, prompt: compressed } as typeof params;
+        // One request for the whole prompt; the server walks the AI SDK
+        // message shape (system role, tool-result parts) and caches repeats.
+        try {
+          const result = await ttcClient.compressChat(params.prompt as unknown[], {
+            model: compressionModel,
+            format: "aisdk",
+            aggressiveness: roleAggr,
+          });
+          stats._recordChat(result);
+          return { ...params, prompt: result.messages } as typeof params;
+        } catch (e) {
+          // Graceful degradation: a compression-backend fault must never break
+          // the customer's underlying LLM call. Fall through uncompressed.
+          console.warn(`[the-token-company] compression failed (${e}); sending uncompressed.`);
+        }
       }
       return params;
     },
