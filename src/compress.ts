@@ -2,7 +2,10 @@ import { TheTokenCompany } from "./client.js";
 import type { Aggressiveness, CompressResult } from "./types.js";
 import { CompressionStats } from "./types.js";
 
-const DEFAULT_ROLES = ["user", "system", "tool"] as const;
+// Assistant/agent turns are compressed by default alongside user/system/tool.
+// To keep the provider's KV cache warm, pass a per-role aggressiveness dict that
+// omits the "assistant" key (see resolveAggressiveness).
+const DEFAULT_ROLES = ["user", "system", "tool", "assistant"] as const;
 const SERVER_TOOL_BLOCK_TYPES = new Set(["web_search_tool_result", "server_tool_use"]);
 
 export interface Compressor {
@@ -267,7 +270,27 @@ export async function compressAISDKPrompt(
 ): Promise<AISDKMessage[]> {
   return Promise.all(
     prompt.map(async (msg) => {
-      if (msg.role === "assistant") return msg;
+      if (msg.role === "assistant") {
+        const assistantAggr = roleAggr["assistant"];
+        if (assistantAggr == null) return msg;
+        if (typeof msg.content === "string" && msg.content.trim()) {
+          const result = await ttc.compress(msg.content, { model, aggressiveness: assistantAggr });
+          return { ...msg, content: result.output };
+        }
+        if (Array.isArray(msg.content)) {
+          const parts = await Promise.all(
+            msg.content.map(async (part) => {
+              if (part.type === "text" && "text" in part && typeof part.text === "string" && part.text.trim()) {
+                const result = await ttc.compress(part.text, { model, aggressiveness: assistantAggr });
+                return { ...part, text: result.output };
+              }
+              return part;
+            })
+          );
+          return { ...msg, content: parts };
+        }
+        return msg;
+      }
 
       if (msg.role === "system") {
         const aggr = roleAggr["system"];

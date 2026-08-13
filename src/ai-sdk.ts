@@ -7,7 +7,11 @@ import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
 /**
- * Create a Vercel AI SDK middleware that auto-compresses non-assistant messages.
+ * Create a Vercel AI SDK middleware that auto-compresses conversation turns.
+ *
+ * Compresses user, system, tool, and assistant/agent turns by default. To keep
+ * the provider's KV cache warm, pass a per-role `aggressiveness` dict that omits
+ * the `assistant` key.
  *
  * ```ts
  * import { wrapLanguageModel } from "ai";
