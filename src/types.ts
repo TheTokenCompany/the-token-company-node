@@ -73,7 +73,12 @@ export interface WithCompressionOptions {
   compressionApiKey: string;
   model?: string;
   aggressiveness?: Aggressiveness;
-  /** Compress text blocks in assistant messages (multi-turn web search optimization). */
+  /**
+   * Deprecated / redundant: assistant (agent) turns are now compressed by
+   * default. Kept for back-compat — forces the `assistant` role back on when a
+   * per-role `aggressiveness` dict omits it. To exclude assistant turns, pass a
+   * dict without the `assistant` key instead.
+   */
   compressAssistant?: boolean;
   /** Strip server-side tool result blocks (e.g. web_search_tool_result) from assistant messages. Disables citations in subsequent turns. */
   stripServerToolResults?: boolean;

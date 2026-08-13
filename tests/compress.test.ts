@@ -15,8 +15,8 @@ function mockTTC(): TheTokenCompany {
 }
 
 describe("resolveAggressiveness", () => {
-  it("expands float to default roles", () => {
-    expect(resolveAggressiveness(0.3)).toEqual({ user: 0.3, system: 0.3, tool: 0.3 });
+  it("expands float to default roles (including assistant)", () => {
+    expect(resolveAggressiveness(0.3)).toEqual({ user: 0.3, system: 0.3, tool: 0.3, assistant: 0.3 });
   });
 
   it("passes dict through", () => {
@@ -37,6 +37,17 @@ describe("compressOpenAIMessages", () => {
     expect(result[0].content).toBe("[c]hello");
     expect(result[1].content).toBe("hi there");
     expect(result[2].content).toBe("[c]bye");
+  });
+
+  it("compresses assistant when the role is present", async () => {
+    const ttc = mockTTC();
+    const messages = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "a long agent response" },
+    ];
+    const result = await compressOpenAIMessages(ttc, messages, "bear-2", { user: 0.2, assistant: 0.3 });
+    expect(result[0].content).toBe("[c]hello");
+    expect(result[1].content).toBe("[c]a long agent response");
   });
 
   it("compresses tool and function roles with tool aggressiveness", async () => {
@@ -328,7 +339,7 @@ describe("compressAnthropicMessages skipToolName", () => {
 });
 
 describe("compressAISDKPrompt", () => {
-  it("compresses system and user, skips assistant", async () => {
+  it("skips assistant when the role is absent from the dict", async () => {
     const ttc = mockTTC();
     const prompt = [
       { role: "system" as const, content: "be helpful" },
@@ -339,6 +350,22 @@ describe("compressAISDKPrompt", () => {
     expect(result[0].content).toBe("[c]be helpful");
     expect(result[1].content).toBe("[c]hello");
     expect(result[2].content).toBe("hi");
+  });
+
+  it("compresses assistant when the role is present", async () => {
+    const ttc = mockTTC();
+    const prompt = [
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "a long agent response" },
+      {
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "a text part" }],
+      },
+    ];
+    const result = await compressAISDKPrompt(ttc, prompt, "bear-2", { user: 0.2, assistant: 0.3 });
+    expect(result[0].content).toBe("[c]hello");
+    expect(result[1].content).toBe("[c]a long agent response");
+    expect((result[2].content as any[])[0].text).toBe("[c]a text part");
   });
 
   it("compresses text parts in user messages", async () => {

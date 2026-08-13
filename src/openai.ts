@@ -4,7 +4,7 @@ import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
 /**
- * Wrap an OpenAI-compatible client to auto-compress non-assistant messages.
+ * Wrap an OpenAI-compatible client to auto-compress conversation turns.
  *
  * Works with `OpenAI`, OpenRouter, and any OpenAI-compatible client.
  *
@@ -20,7 +20,9 @@ import { CompressionStats } from "./types.js";
  * console.log(client.compression.totalTokensSaved);
  * ```
  *
- * Assistant messages pass through unchanged to preserve the provider's KV cache.
+ * Assistant/agent turns are compressed by default. To keep the provider's KV
+ * cache warm, pass a per-role `aggressiveness` dict that omits the `assistant`
+ * key (e.g. `{ user: 0.2, system: 0.2, tool: 0.2 }`).
  */
 export function withCompression<T extends { chat: { completions: { create: Function } } }>(
   client: T,

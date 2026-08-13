@@ -155,9 +155,10 @@ async function handleSearchLoop(
 }
 
 /**
- * Wrap an Anthropic client to auto-compress non-assistant messages.
+ * Wrap an Anthropic client to auto-compress conversation turns.
  *
- * Compresses the `system` parameter and all non-assistant messages.
+ * Compresses the `system` parameter and all messages — user, tool, and
+ * assistant/agent turns — by default.
  *
  * ```ts
  * import Anthropic from "@anthropic-ai/sdk";
@@ -173,7 +174,9 @@ async function handleSearchLoop(
  * console.log(client.compression.totalTokensSaved);
  * ```
  *
- * Assistant messages pass through unchanged to preserve the provider's KV cache.
+ * Assistant/agent turns are compressed by default. To keep the provider's KV
+ * cache warm, pass a per-role `aggressiveness` dict that omits the `assistant`
+ * key (e.g. `{ user: 0.2, system: 0.2, tool: 0.2 }`).
  */
 export function withCompression<T extends { messages: { create: Function } }>(
   client: T,
