@@ -1,5 +1,5 @@
 import { TheTokenCompany } from "./client.js";
-import { resolveAggressiveness } from "./compress.js";
+import { deferredAPIPromise, resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -34,7 +34,7 @@ export function withCompression<T extends { chat: { completions: { create: Funct
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
   const originalCreate = client.chat.completions.create.bind(client.chat.completions);
 
-  client.chat.completions.create = async function (params: any, ...rest: any[]) {
+  async function compress(params: any): Promise<any> {
     if (params?.messages) {
       // One request for the whole conversation — the server walks the roles,
       // compresses every segment concurrently, and serves re-sent history
@@ -53,7 +53,12 @@ export function withCompression<T extends { chat: { completions: { create: Funct
         console.warn(`[the-token-company] compression failed (${e}); sending uncompressed.`);
       }
     }
-    return originalCreate(params, ...rest);
+    return params;
+  }
+
+  // Not async: return the SDK's APIPromise shape so withResponse()/parse() keep working.
+  client.chat.completions.create = function (params: any, ...rest: any[]) {
+    return deferredAPIPromise(compress(params).then((p) => ({ apiPromise: originalCreate(p, ...rest) })));
   } as any;
 
   (client as any).compression = stats;

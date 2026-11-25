@@ -1,5 +1,5 @@
 import { TheTokenCompany } from "./client.js";
-import { collectToolUseIds, resolveAggressiveness } from "./compress.js";
+import { collectToolUseIds, deferredAPIPromise, resolveAggressiveness } from "./compress.js";
 import type { WithCompressionOptions, SearchResultItem } from "./types.js";
 import { CompressionStats } from "./types.js";
 
@@ -193,7 +193,7 @@ export function withCompression<T extends { messages: { create: Function } }>(
   const webSearch = options.webSearch ?? false;
   const originalCreate = client.messages.create.bind(client.messages);
 
-  client.messages.create = async function (params: any, ...rest: any[]) {
+  async function prepare(params: any): Promise<{ params: any; nativeMaxUses: number | null }> {
     if (params?.messages) {
       // Messages + system compressed in ONE request; the server walks the
       // roles and tool_result blocks and serves re-sent history from cache.
@@ -231,17 +231,24 @@ export function withCompression<T extends { messages: { create: Function } }>(
       nativeMaxUses = injected.nativeMaxUses;
     }
 
-    let response = await originalCreate(params, ...rest);
+    return { params, nativeMaxUses };
+  }
+
+  // Not async: return the SDK's APIPromise shape so messages.stream() and
+  // withResponse() keep working.
+  client.messages.create = function (params: any, ...rest: any[]) {
+    const prepared = prepare(params);
+    const call = prepared.then((p) => ({ apiPromise: originalCreate(p.params, ...rest) }));
+    if (!webSearch) return deferredAPIPromise(call);
 
     // Handle search tool loop, capped at the resolved max_uses.
-    if (webSearch) {
-      response = await handleSearchLoop(
-        response, params, originalCreate, ttcClient, stats, rest,
-        effectiveMaxUses(options.webSearchMaxUses, nativeMaxUses)
+    return deferredAPIPromise(call, async (response) => {
+      const p = await prepared;
+      return handleSearchLoop(
+        response, p.params, originalCreate, ttcClient, stats, rest,
+        effectiveMaxUses(options.webSearchMaxUses, p.nativeMaxUses)
       );
-    }
-
-    return response;
+    });
   } as any;
 
   (client as any).compression = stats;
