@@ -76,6 +76,37 @@ describe("anthropic wrapper keeps the APIPromise shape", () => {
   });
 });
 
+describe("anthropic wrapper with webSearch", () => {
+  it("create(...).withResponse() returns the answer after the search, not the tool call", async () => {
+    const toolCall = {
+      stop_reason: "tool_use",
+      content: [{ type: "tool_use", id: "tu_1", name: "ttc_web_search", input: { query: "q" } }],
+    };
+    const answer = { stop_reason: "end_turn", content: [{ type: "text", text: "answer" }] };
+    const create = vi.fn().mockReturnValueOnce(fakeAPIPromise(toolCall)).mockReturnValueOnce(fakeAPIPromise(answer));
+    const fetch = vi.fn(async (url: string, opts: any) => {
+      if (url.includes("/v1/search")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ results: [], query: "q", search_time: 0, original_input_tokens: 0, output_tokens: 0 }),
+          text: async () => "",
+        };
+      }
+      return (compressFetch as any)(url, opts);
+    }) as unknown as typeof globalThis.fetch;
+    const client = withAnthropic({ messages: { create } } as any, { ...OPTIONS, fetch, webSearch: true });
+
+    const { data, response } = await client.messages
+      .create({ model: "m", max_tokens: 16, messages: MESSAGES })
+      .withResponse();
+
+    expect(data).toEqual(answer);
+    expect(response).toBe(RESPONSE);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("openai wrapper keeps the APIPromise shape", () => {
   function makeClient() {
     const create = vi.fn((params: any) => fakeAPIPromise({ choices: [], stream: !!params.stream }));
