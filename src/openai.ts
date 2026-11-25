@@ -29,7 +29,7 @@ export function withCompression<T extends { chat: { completions: { create: Funct
   options: WithCompressionOptions
 ): T & { compression: CompressionStats } {
   const stats = new CompressionStats();
-  const ttcClient = new TheTokenCompany({ apiKey: options.compressionApiKey, appId: options.appId, fetch: options.fetch });
+  const ttcClient = new TheTokenCompany({ apiKey: options.compressionApiKey, baseUrl: options.baseUrl, appId: options.appId, fetch: options.fetch });
   const model = options.model ?? "bear-2";
   const roleAggr = resolveAggressiveness(options.aggressiveness ?? 0.2);
   const originalCreate = client.chat.completions.create.bind(client.chat.completions);
