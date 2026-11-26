@@ -32,6 +32,39 @@ export function resolveAggressiveness(aggressiveness: Aggressiveness): Record<st
   return aggressiveness;
 }
 
+/**
+ * The SDKs' `create()` returns an APIPromise, and their own helpers call methods
+ * on it: `messages.stream()` calls `withResponse()`, OpenAI's
+ * `chat.completions.parse()` calls `_thenUnwrap()`. Compression is async, so a
+ * wrapped `create()` can't return that APIPromise synchronously; this returns a
+ * stand-in that forwards those methods to it once `call` has produced it.
+ * `call` resolves to `{ apiPromise }` (boxed so it isn't awaited into its data).
+ * `finish` post-processes the data (the web-search loop), awaited or via withResponse().
+ */
+export function deferredAPIPromise(
+  call: Promise<{ apiPromise: any }>,
+  finish: (data: any) => any = (data) => data
+): any {
+  // Lazy like APIPromise: the request is already in flight, but `finish` only
+  // runs (and can only reject) when the caller awaits the data.
+  let data: Promise<any> | undefined;
+  const awaited = () => (data ??= call.then(({ apiPromise }) => apiPromise).then(finish));
+  return {
+    then: (onFulfilled?: any, onRejected?: any) => awaited().then(onFulfilled, onRejected),
+    catch: (onRejected?: any) => awaited().catch(onRejected),
+    finally: (onFinally?: any) => awaited().finally(onFinally),
+    // `data` goes through `finish` too (so the web-search loop runs); `response`
+    // is the first request's HTTP response.
+    withResponse: () =>
+      call
+        .then(({ apiPromise }) => apiPromise.withResponse())
+        .then(async (r: any) => ({ ...r, data: await finish(r.data) })),
+    asResponse: () => call.then(({ apiPromise }) => apiPromise.asResponse()),
+    _thenUnwrap: (transform: any) =>
+      deferredAPIPromise(call.then(({ apiPromise }) => ({ apiPromise: apiPromise._thenUnwrap(transform) }))),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI message compression
 // ---------------------------------------------------------------------------
